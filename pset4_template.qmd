@@ -44,13 +44,91 @@ Please refer to the minilesson on code style
 ## Download and explore the Provider of Services (POS) file (10 pts)
 
 1. 
+PRVDR_CTGRY_SBTYP_CD - Provider Category Subtype Code
+PRVDR_CTGRY_CD - Provider Category Code
+CHOW_DT - Change of Ownership Date
+CITY_NAME - City where the facility is located
+STATE_CD - State code
+SSA_CNTY_CD - County code
+ZIP_CD - Zip code of the facility
+CRTFD_BED_CNT - Certified bed count
+FAC_NAME - Facility name
+ST_ADR - Street address
+
 2. 
     a.
-    b.
-3. 
+ ```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+
+# Define a function to load and filter data for short-term hospitals by year
+def load_and_filter_pos(file_path, year):
+    # Load the data with a specified encoding
+    pos_data = pd.read_csv(file_path, low_memory=False, encoding='latin1')
+    
+    # Filter for short-term hospitals
+    short_term_hospitals = pos_data[(pos_data['PRVDR_CTGRY_CD'] == 1) & 
+                                    (pos_data['PRVDR_CTGRY_SBTYP_CD'] == 1)]
+    
+    # Add a column for the year
+    short_term_hospitals['Year'] = year
+    print(f"Year {year} - Number of short-term hospitals: {len(short_term_hospitals)}")  # Check the count
+    return short_term_hospitals
+
+# Load and filter each year's dataset individually
+pos2016 = load_and_filter_pos('pos2016.csv', 2016)
+pos2017 = load_and_filter_pos('pos2017.csv', 2017)
+pos2018 = load_and_filter_pos('pos2018.csv', 2018)
+pos2019 = load_and_filter_pos('pos2019.csv', 2019)
+
+# Append the datasets together
+all_years_data = pd.concat([pos2016, pos2017, pos2018, pos2019], ignore_index=True)
+
+# Count the number of observations by year in the combined data
+observations_by_year = all_years_data['Year'].value_counts().sort_index()
+
+# Plot the number of observations by year with more precise y-axis values
+plt.figure(figsize=(10, 6))
+observations_by_year.plot(kind='bar')
+plt.title('Number of Short-Term Hospital Observations by Year')
+plt.xlabel('Year')
+plt.ylabel('Number of Observations')
+plt.ylim(7240, 7305)
+plt.yticks(range(7240, 7306, 5))
+
+# Set y-axis with a smaller range of intervals to capture subtle differences
+plt.yticks(range(min(observations_by_year) - 10, max(observations_by_year) + 10, 10))
+
+plt.xticks(rotation=0)
+plt.show()
+
+```
+
 4. 
     a.
+```{python}
+import pandas as pd
+import matplotlib.pyplot as plt
+
+unique_hospitals_by_year = all_years_data.groupby('Year')['PRVDR_NUM'].nunique()
+
+# Plot the number of unique hospitals per year
+plt.figure(figsize=(10, 6))
+unique_hospitals_by_year.plot(kind='bar')
+plt.title('Number of Unique Short-Term Hospitals by Year')
+plt.xlabel('Year')
+plt.ylabel('Number of Unique Hospitals')
+plt.ylim(7240, 7305)  # Set a similar y-axis range for easy comparison
+plt.xticks(rotation=0)
+plt.show()
+
+# Display the count for reference
+print(unique_hospitals_by_year)
+
+```
+
     b.
+    Each CMS certification number (PRVDR_NUM) appears only once per year. This indicates that the dataset is structured so that each hospital has a single, unique record in each year, without duplicate entries or multiple records reflecting different operational statuses or characteristics within the same year. Since there are no duplicates within each year, the dataset is reliable for examining trends over time, such as changes in the number of active short-term hospitals each year. The increase in counts from 2016 to 2019 reflects an actual trend rather than potential data artifacts caused by duplicated records.
 
 ## Identify hospital closures in POS file (15 pts) (*)
 
