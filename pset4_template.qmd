@@ -46,12 +46,11 @@ Please refer to the minilesson on code style
 1. 
 PRVDR_CTGRY_SBTYP_CD - Provider Category Subtype Code
 PRVDR_CTGRY_CD - Provider Category Code
-CHOW_DT - Change of Ownership Date
+PRVDR_NUM - CMS Certification Number
+PGM_TRMNTN_CD - current termination status
 CITY_NAME - City where the facility is located
 STATE_CD - State code
-SSA_CNTY_CD - County code
 ZIP_CD - Zip code of the facility
-CRTFD_BED_CNT - Certified bed count
 FAC_NAME - Facility name
 ST_ADR - Street address
 
@@ -133,11 +132,71 @@ print(unique_hospitals_by_year)
 ## Identify hospital closures in POS file (15 pts) (*)
 
 1. 
+```{python}
+def load_and_filter_pos(file_path, year):
+    pos_data = pd.read_csv(file_path, low_memory=False, encoding='latin1')
+    pos_data['Year'] = year
+    return pos_data
+
+pos2016 = load_and_filter_pos('pos2016.csv', 2016)
+pos2017 = load_and_filter_pos('pos2017.csv', 2017)
+pos2018 = load_and_filter_pos('pos2018.csv', 2018)
+pos2019 = load_and_filter_pos('pos2019.csv', 2019)
+all_years_data = pd.concat([pos2016, pos2017, pos2018, pos2019], ignore_index=True)
+```
+```{python}
+pivoted_data = all_years_data.pivot_table(
+    index=['PRVDR_NUM', 'FAC_NAME', 'ZIP_CD'], 
+    columns='Year', 
+    values='PGM_TRMNTN_CD', 
+    aggfunc='first'
+).reset_index()
+```
+```{python}
+pivoted_data['Suspected_Closure_Year'] = pivoted_data.apply(
+    lambda row: next((year for year in [2017, 2018, 2019] if \
+        (pd.isna(row[year]) or row[year] != 0) and row[2016] == 0), None), axis=1)
+suspected_closures = pivoted_data.dropna(subset=['Suspected_Closure_Year'])
+```
+```{python}
+suspected_closures_list = suspected_closures[['FAC_NAME', 'ZIP_CD', 'Suspected_Closure_Year']]
+total_suspected_closures = len(suspected_closures)
+print(total_suspected_closures)
+```
+15730 hospital fit this definition
 2. 
+```{python}
+sorted_suspected_closures = suspected_closures_list.sort_values(by='FAC_NAME')
+sorted_suspected_closures.head(10)
+```
 3. 
     a.
+    ```{python}
+    zip_year_counts = all_years_data[all_years_data['PGM_TRMNTN_CD'] == 0].groupby(['ZIP_CD', 'Year']).size()
+    ```
+    ```{python}
+    suspected_closures['Is_Merger'] = suspected_closures.apply(
+    lambda row: (
+        zip_year_counts.get((row['ZIP_CD'], row['Suspected_Closure_Year'] + 1), 0) >= 
+        zip_year_counts.get((row['ZIP_CD'], row['Suspected_Closure_Year']), 0)
+    ) if row['Suspected_Closure_Year'] < 2019 else False,
+    axis=1)
+
+    potential_mergers = suspected_closures[suspected_closures['Is_Merger']]
+    corrected_closures = suspected_closures[~suspected_closures['Is_Merger']]
+    ```
     b.
+    ```{python}
+    num_potential_mergers = len(potential_mergers)
+    num_corrected_closures = len(corrected_closures)
+    print("Number of hospitals identified as potential mergers:", num_potential_mergers)
+    print("Number of hospitals remaining after correction:", num_corrected_closures)
+    ```
     c.
+    ```{python}
+    corrected_closures_sorted = corrected_closures[['FAC_NAME', 'ZIP_CD', 'Suspected_Closure_Year']].sort_values(by='FAC_NAME')
+    corrected_closures_sorted.head(10)
+    ```
 
 ## Download Census zip code shapefile (10 pt) 
 
