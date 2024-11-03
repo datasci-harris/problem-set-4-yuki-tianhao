@@ -208,15 +208,143 @@ sorted_suspected_closures.head(10)
 ## Calculate zip code’s distance to the nearest hospital (20 pts) (*)
 
 1. 
+```{python}
+# import sys
+# sys.setrecursionlimit(200000) 
+
+import geopandas as gpd
+shapefile_path = 'gz_2010_us_860_00_500k/gz_2010_us_860_00_500k.shp'
+zips_all = gpd.read_file(shapefile_path)
+```
+```{python}
+zips_all_centroids = zips_all.copy()
+zips_all_centroids['centroid'] = zips_all.geometry.centroid
+zips_all_centroids = zips_all_centroids.set_geometry('centroid')
+```
+```{python}
+print("Dimensions of the GeoDataFrame:", zips_all_centroids.shape)
+```
+
+GEO_ID: A unique identifier for each area, formatted with a prefix (8600000US) plus the ZIP code.
+ZCTA5: The 5-digit ZIP Code Tabulation Area (ZCTA), a Census Bureau representation of a ZIP code area.
+NAME: The ZIP code associated with each ZCTA.
+LSAD: Indicates that each row is a 5-digit ZCTA.
+CENSUSAREA: The land area of the ZCTA in square miles.
+geometry: The shape of each ZCTA, as either:
+POLYGON: A single shape.
+MULTIPOLYGON: Multiple shapes, used if a ZIP code area is split into separate parts.
 2. 
+```{python}
+texas_zip_prefixes = ['75', '76', '77', '78', '79']  # Texas ZIP code prefixes
+zips_texas_centroids = zips_all_centroids[zips_all_centroids['ZCTA5'].str.startswith(tuple(texas_zip_prefixes))]
+unique_texas_zips = zips_texas_centroids['ZCTA5'].nunique()
+```
+```{python}
+from shapely.ops import unary_union
+
+texas_polygon = unary_union(zips_texas_centroids.geometry).convex_hull
+# making this multipolygon into a big polygon with convex_hull
+def polygons_intersect_or_touch(polygon1, polygon2):
+    return polygon1.intersects(polygon2) or polygon1.touches(polygon2)
+```
+```{python}
+zips_texas_borderstates_centroids = zips_all_centroids[zips_all_centroids.geometry.apply(lambda x: polygons_intersect_or_touch(texas_polygon, x))]
+
+unique_texas_border_zips = zips_texas_borderstates_centroids['ZCTA5'].nunique()
+print("Number of unique ZIP codes in Texas:", unique_texas_zips)
+print("Number of unique ZIP codes in Texas and border states:", unique_texas_border_zips)
+```
 3. 
+```{python}
+zips_texas_borderstates_centroids['ZCTA5'] = pd.to_numeric(zips_texas_borderstates_centroids['ZCTA5'], errors='coerce')
+
+hospital_zip_codes_2016 = pos2016[['ZIP_CD']].drop_duplicates()
+zips_withhospital_centroids = zips_texas_borderstates_centroids.merge(
+    hospital_zip_codes_2016,
+    how='inner',
+    left_on='ZCTA5',
+    right_on='ZIP_CD'
+)
+unique_hospital_zips = zips_withhospital_centroids['ZCTA5'].nunique()
+print("Number of unique ZIP codes in Texas and bordering states with at least one hospital in 2016:", unique_hospital_zips)
+```
+Number of unique ZIP codes in Texas and bordering states with at least one hospital in 2016: 1292.
+
+The merge function joins zips_texas_borderstates_centroids and hospital_zip_codes_2016:
+
+how='inner': An inner join keeps only the rows where ZCTA5 in zips_texas_borderstates_centroids matches ZIP_CD in hospital_zip_codes_2016.
+
+left_on='ZCTA5', right_on='ZIP_CD': Specifies the columns to match on.
 4. 
+```{python}
+import time
+from shapely.ops import nearest_points
+
+subset_zips_texas_centroids = zips_texas_centroids.head(10)
+def calculate_nearest_distance(row, target_gdf):
+    nearest_geom = nearest_points(row.geometry, target_gdf.unary_union)[1]
+    return row.geometry.distance(nearest_geom)
+
+start_time = time.time()
+subset_zips_texas_centroids['nearest_distance'] = subset_zips_texas_centroids.apply(
+    calculate_nearest_distance, target_gdf=zips_withhospital_centroids, axis=1
+)
+
+elapsed_time = time.time() - start_time
+print(f"Time taken for 10 ZIP codes: {elapsed_time:.2f} seconds")
+```
+```{python}
+total_rows = len(zips_texas_centroids)
+estimated_time = (elapsed_time / 10) * total_rows
+print(f"Estimated time for full dataset: {estimated_time / 60:.2f} minutes")
+```
     a.
+```{python}
+start_time = time.time()
+
+zips_texas_centroids['nearest_distance'] = zips_texas_centroids.apply(
+calculate_nearest_distance, target_gdf=zips_withhospital_centroids, axis=1
+)
+
+full_elapsed_time = time.time() - start_time
+print(f"Time taken for full dataset: {full_elapsed_time / 60:.2f} minutes")
+```
+Estimated time for full dataset: 0.14 minutes
+Time taken for full dataset: 0.08 minutes
+They were quite off.
     b.
+    The .prj file indicates that the coordinate system is GCS_North_American_1983, with units in degrees.
+```{python}
+zips_texas_centroids = zips_texas_centroids.to_crs("EPSG:5070")
+zips_withhospital_centroids = zips_withhospital_centroids.to_crs("EPSG:5070")
+zips_texas_centroids['nearest_distance_meters'] = zips_texas_centroids.apply(
+    calculate_nearest_distance, target_gdf=zips_withhospital_centroids, axis=1
+)
+conversion_factor = 0.000621371  # 1 meter ≈ 0.000621371 miles
+zips_texas_centroids['nearest_distance_miles'] = zips_texas_centroids['nearest_distance_meters'] * conversion_factor
+
+average_distance_miles = zips_texas_centroids['nearest_distance_miles'].mean()
+```
 5. 
     a.
+    In miles.
     b.
+```{python}
+print(f"Average distance to the nearest hospital for each ZIP code in Texas (in miles): {average_distance_miles:.2f}")
+```
     c.
+```{python}
+import matplotlib.pyplot as plt
+
+# Plot the distance to the nearest hospital for each ZIP code
+fig, ax = plt.subplots(1, 1, figsize=(10, 10))
+zips_texas_centroids.plot(column='nearest_distance_miles', cmap='coolwarm', linewidth=0.8, ax=ax, edgecolor='0.8', legend=True)
+
+ax.set_title("Distance to Nearest Hospital for Each ZIP Code in Texas (in miles)")
+ax.set_axis_off()
+plt.show()
+```
+This makes sense, as ZIP codes closer to the U.S. border tend to have greater distances to the nearest hospital compared to those located further inland.
     
 ## Effects of closures on access in Texas (15 pts)
 
@@ -226,3 +354,7 @@ sorted_suspected_closures.head(10)
 4. 
 
 ## Reflecting on the exercise (10 pts) 
+
+1. 
+2.The current approach identifies closures by checking if a hospital listed as “active” in 2016 is either not active or missing in later years. It adjusts for some mergers by removing suspected closures if the number of active hospitals in the ZIP code doesn’t decrease. It may misidentify closures if hospitals close and reopen under new certifications and in neighboring ZIP codes. It doesn’t account for population size, so it treats closures in densely populated and sparsely populated areas the same. Some improvement can be weighting closures by the population of the affected ZIP code to better understand the impact, or check if a hospital reopens in a neighboring ZIP code within a short distance, which may indicate a relocation rather than a true closure.
+
